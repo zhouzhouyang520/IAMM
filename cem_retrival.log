@@ -1,0 +1,98 @@
+05-28 09:54 Vocab  23712 
+================================================================================
+                                      Opts                                      
+--------------------------------------------------------------------------------
+                               data_dir: data/ED                                
+                              emo_input: self_att                               
+                            emo_combine: gate                                   
+                                decoder: single                                 
+                             hidden_dim: 300                                    
+                                emb_dim: 300                                    
+                             batch_size: 16                                     
+                                     lr: 0.0001                                 
+                          max_grad_norm: 2.0                                    
+                              beam_size: 5                                      
+                                   seed: 42                                     
+                              save_path: save/test                              
+                             model_path: save/test                              
+                      save_path_dataset: save/                                  
+                                   cuda: 1                                      
+                            pointer_gen: 1                                      
+                          basic_learner: 1                                      
+                                   topk: 5                                      
+                                softmax: 1                                      
+                               schedule: 10000                                  
+                           pretrain_emb: 1                                      
+                                  model: iamm                                   
+                        label_smoothing: 1                                      
+                                   noam: 1                                      
+                        act_loss_weight: 0.001                                  
+                              word_topk: 5                                      
+                                cs_topk: 5                                      
+                            hgnn_hidden: 150                                    
+                               hgnn_out: 50                                     
+                               ctx_topk: 15                                     
+                               con_topk: 5                                      
+                                    hop: 1                                      
+                                  heads: 2                                      
+                                  depth: 40                                     
+                                 filter: 50                                     
+                              device_id: 7                                      
+                            result_name: my_result.txt                          
+================================================================================
+LOADING empathetic_dialogue
+[situation]: i remember going to the fireworks with my best friend . there was a lot of people , but it only felt like us in the world .
+[emotion]: sentimental
+[context]: ['i remember going to see the fireworks with my best friend . it was the first time we ever spent time alone together . although there was a lot of people , we felt like the only people in the world .']
+[target]: was this a friend you were in love with , or just a best friend ?
+ 
+[situation]: i remember going to the fireworks with my best friend . there was a lot of people , but it only felt like us in the world .
+[emotion]: sentimental
+[context]: ['i remember going to see the fireworks with my best friend . it was the first time we ever spent time alone together . although there was a lot of people , we felt like the only people in the world .', 'was this a friend you were in love with , or just a best friend ?', 'this was a best friend . i miss her .']
+[target]: where has she gone ?
+ 
+[situation]: i remember going to the fireworks with my best friend . there was a lot of people , but it only felt like us in the world .
+[emotion]: sentimental
+[context]: ['i remember going to see the fireworks with my best friend . it was the first time we ever spent time alone together . although there was a lot of people , we felt like the only people in the world .', 'was this a friend you were in love with , or just a best friend ?', 'this was a best friend . i miss her .', 'where has she gone ?', 'we no longer talk .']
+[target]: oh was this something that happened because of an argument ?
+ 
+[situation]: i used to scare for darkness
+[emotion]: afraid
+[context]: ['it feels like hitting to blank wall when i see the darkness']
+[target]: oh ya ? i do not really see how
+ 
+[situation]: i used to scare for darkness
+[emotion]: afraid
+[context]: ['it feels like hitting to blank wall when i see the darkness', 'oh ya ? i do not really see how', 'dont you feel so .. its a wonder']
+[target]: i do actually hit blank walls a lot of times but i get by
+ 
+[situation]: i used to scare for darkness
+[emotion]: afraid
+[context]: ['it feels like hitting to blank wall when i see the darkness', 'oh ya ? i do not really see how', 'dont you feel so .. its a wonder', 'i do actually hit blank walls a lot of times but i get by', 'i virtually thought so .. and i used to get sweatings']
+[target]: wait what are sweatings
+ 
+[situation]: i showed a guy how to run a good bead in welding class and he caught on quick .
+[emotion]: proud
+[context]: ['hi how are you doing today']
+[target]: doing good .. how about you
+ 
+[situation]: i showed a guy how to run a good bead in welding class and he caught on quick .
+[emotion]: proud
+[context]: ['hi how are you doing today', 'doing good .. how about you', 'im good , trying to understand how someone can feel like hitting a blank wall when they see the darkness']
+[target]: it is quite strange that you didnt imagine it
+ 
+[situation]: i have always been loyal to my wife .
+[emotion]: faithful
+[context]: ['i have never cheated on my wife .']
+[target]: and thats something you should never do , good on you .
+ 
+[situation]: i have always been loyal to my wife .
+[emotion]: faithful
+[context]: ['i have never cheated on my wife .', 'and thats something you should never do , good on you .', "yea it has n't been easy but i am proud i have n't"]
+[target]: what do you mean it has n't been easy ? how close have you come to cheating ?
+ 
+Embeddings: 23712 x 300
+Loading embedding file: vectors/glove.6B.300d.txt
+Pre-trained: 19503 (82.25%)
+# PARAMETERS 18886443
+  0%|          | 0/1000000 [00:00<?, ?it/s]  0%|          | 1/1000000 [00:01<442:37:39,  1.59s/it]  0%|          | 2/1000000 [00:02<261:39:32,  1.06it/s]  0%|          | 3/1000000 [00:02<236:00:36,  1.18it/s]  0%|          | 4/1000000 [00:03<243:38:45,  1.14it/s]  0%|          | 5/1000000 [00:04<200:16:17,  1.39it/s]  0%|          | 6/1000000 [00:04<192:43:14,  1.44it/s]  0%|          | 7/1000000 [00:05<170:48:36,  1.63it/s]  0%|          | 8/1000000 [00:06<198:37:38,  1.40it/s]  0%|          | 9/1000000 [00:06<176:38:45,  1.57it/s]  0%|          | 10/1000000 [00:07<161:28:17,  1.72it/s]  0%|          | 11/1000000 [00:07<171:28:09,  1.62it/s]  0%|          | 12/1000000 [00:08<174:22:16,  1.59it/s]  0%|          | 13/1000000 [00:08<158:07:27,  1.76it/s]  0%|          | 14/1000000 [00:09<165:04:35,  1.68it/s]  0%|          | 15/1000000 [00:10<170:15:20,  1.63it/s]  0%|          | 16/1000000 [00:10<156:44:16,  1.77it/s]  0%|          | 17/1000000 [00:11<147:00:19,  1.89it/s]  0%|          | 18/1000000 [00:11<161:22:56,  1.72it/s]  0%|          | 19/1000000 [00:12<150:13:57,  1.85it/s]  0%|          | 20/1000000 [00:12<142:12:17,  1.95it/s]  0%|          | 21/1000000 [00:13<153:18:23,  1.81it/s]  0%|          | 22/1000000 [00:14<162:23:17,  1.71it/s]  0%|          | 23/1000000 [00:14<149:53:13,  1.85it/s]  0%|          | 24/1000000 [00:14<142:49:25,  1.94it/s]  0%|          | 25/1000000 [00:15<137:03:12,  2.03it/s]  0%|          | 26/1000000 [00:16<153:39:26,  1.81it/s]  0%|          | 27/1000000 [00:16<145:00:36,  1.92it/s]  0%|          | 28/1000000 [00:17<176:37:52,  1.57it/s]  0%|          | 29/1000000 [00:17<158:01:19,  1.76it/s]  0%|          | 30/1000000 [00:18<184:22:43,  1.51it/s]  0%|          | 31/1000000 [00:19<180:07:18,  1.54it/s]  0%|          | 32/1000000 [00:19<160:40:47,  1.73it/s]  0%|          | 33/1000000 [00:20<146:54:48,  1.89it/s]  0%|          | 34/1000000 [00:20<174:03:58,  1.60it/s]  0%|          | 35/1000000 [00:21<157:17:49,  1.77it/s]  0%|          | 36/1000000 [00:21<146:52:48,  1.89it/s]  0%|          | 37/1000000 [00:22<156:12:54,  1.78it/s]  0%|          | 38/1000000 [00:23<166:53:51,  1.66it/s]  0%|          | 39/1000000 [00:23<153:07:55,  1.81it/s]  0%|          | 40/1000000 [00:24<145:42:19,  1.91it/s]  0%|          | 41/1000000 [00:24<140:05:26,  1.98it/s]  0%|          | 42/1000000 [00:25<136:16:39,  2.04it/s]  0%|          | 43/1000000 [00:26<192:19:16,  1.44it/s]  0%|          | 44/1000000 [00:26<175:48:13,  1.58it/s]  0%|          | 45/1000000 [00:27<164:05:52,  1.69it/s]  0%|          | 46/1000000 [00:27<155:20:03,  1.79it/s]  0%|          | 47/1000000 [00:28<150:35:51,  1.84it/s]  0%|          | 48/1000000 [00:28<149:17:11,  1.86it/s]  0%|          | 49/1000000 [00:29<186:56:32,  1.49it/s]  0%|          | 50/1000000 [00:30<174:19:10,  1.59it/s]  0%|          | 51/1000000 [00:30<184:44:08,  1.50it/s]  0%|          | 52/1000000 [00:31<209:33:56,  1.33it/s]  0%|          | 53/1000000 [00:32<206:47:02,  1.34it/s]  0%|          | 54/1000000 [00:33<185:25:16,  1.50it/s]  0%|          | 55/1000000 [00:33<192:45:10,  1.44it/s]  0%|          | 56/1000000 [00:34<178:53:57,  1.55it/s]  0%|          | 57/1000000 [00:34<172:51:27,  1.61it/s]  0%|          | 58/1000000 [00:35<167:43:13,  1.66it/s]  0%|          | 59/1000000 [00:36<165:51:17,  1.67it/s]  0%|          | 60/1000000 [00:36<158:55:33,  1.75it/s]  0%|          | 61/1000000 [00:37<152:42:26,  1.82it/s]  0%|          | 62/1000000 [00:38<199:33:30,  1.39it/s]  0%|          | 63/1000000 [00:38<178:14:44,  1.56it/s]  0%|          | 64/1000000 [00:39<165:16:04,  1.68it/s]  0%|          | 65/1000000 [00:39<160:23:14,  1.73it/s]  0%|          | 66/1000000 [00:40<161:14:33,  1.72it/s]  0%|          | 67/1000000 [00:40<158:53:17,  1.75it/s]  0%|          | 68/1000000 [00:41<181:27:42,  1.53it/s]  0%|          | 69/1000000 [00:42<176:23:27,  1.57it/s]  0%|          | 70/1000000 [00:42<172:42:22,  1.61it/s]  0%|          | 71/1000000 [00:43<188:01:54,  1.48it/s]
