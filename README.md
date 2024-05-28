@@ -1,5 +1,5 @@
 # ESCM
-## Code and data for ACL 2023: An Iterative Associative Memory Model for Empathetic Response Generation.
+## Code and data for ACL 2024: An Iterative Associative Memory Model for Empathetic Response Generation.
 
 ## Environment
 ```code
