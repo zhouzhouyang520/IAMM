@@ -30,6 +30,10 @@ mv glove.6B.300d.txt vectors
 ```sh
 pip install -r requirements.txt
 ```
+or
+```sh
+conda env create -f envs.yml
+```
 The project mainly referenced the code from [CEM](https://github.com/Sahandfer/CEM) and [ESCM](https://github.com/zhouzhouyang520/EmpatheticDialogueGeneration_ESCM). If there are issues during installation, you can try using the environments from these two projects.
 
 ## Model Training
