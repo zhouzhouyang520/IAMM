@@ -11,7 +11,7 @@ torch==2.0.1
 To run this code, you should：
 1. Clone the project from github.
 ```sh
-git clone IAMM
+git clone https://github.com/zhouzhouyang520/IAMM.git
 ```
 2. Enter the project root directory
 ```sh
