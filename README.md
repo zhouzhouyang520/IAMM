@@ -1,4 +1,4 @@
-# ESCM
+# IAMM
 ## Code and data for ACL 2024: An Iterative Associative Memory Model for Empathetic Response Generation.
 
 ## Environment
