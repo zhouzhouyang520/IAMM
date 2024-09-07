@@ -360,15 +360,21 @@ class IAMM(nn.Module):
         self.compress_dim = 10
 
         self.embedding = share_embedding(self.vocab, config.pretrain_emb)
+        #self.type_embedding = nn.Embedding(vocab, d_model, padding_idx=padding_idx) # relation type: cc, sc, rc
+        #print(f"self.adjacency_matrix: {self.adjacency_matrix}")
+        # Build HGNN for relations.
 
         self.encoder = self.make_encoder(config.emb_dim)
         self.total_encoder = self.make_encoder(config.emb_dim)
+#        self.emo_encoder = self.make_encoder(config.emb_dim)
         self.cog_encoder = self.make_encoder(config.emb_dim)
 
         self.sit_encoder = self.make_encoder(config.emb_dim)
         self.rel_encoder = self.make_encoder(config.emb_dim)
+#        self.con_rel_encoder = self.make_encoder(config.emb_dim)
         self.total_con_encoder = self.make_encoder(config.emb_dim)
         self.sc_MHA = self.make_MHA(num_heads=2, depth=config.depth) #depth=40
+        #self.cc_MHA = self.make_MHA(num_heads=2, depth=config.depth) #depth=40
         self.cc_MHA = self.sc_MHA
         self.rc_MHA = self.make_MHA(num_heads=2, depth=config.depth) #depth=40
 
@@ -377,6 +383,16 @@ class IAMM(nn.Module):
         self.con_rc_MHA = self.make_MHA(num_heads=2, depth=config.depth) #depth=40
 
         self.decoder = Decoder(
+            config.emb_dim,
+            hidden_size=config.hidden_dim,
+            num_layers=config.hop,
+            num_heads=config.heads,
+            total_key_depth=config.depth,
+            total_value_depth=config.depth,
+            filter_size=config.filter,
+        )
+
+        self.sit_decoder = Decoder(
             config.emb_dim,
             hidden_size=config.hidden_dim,
             num_layers=config.hop,
@@ -401,6 +417,10 @@ class IAMM(nn.Module):
         self.logit_linear = nn.Linear(3 * config.hidden_dim, 1) 
         self.rs_logit_linear = nn.Linear(2 * config.hidden_dim, 1) 
 
+        self.idf_proj = nn.Linear(config.hidden_dim, self.vocab_size)
+        self.weight_encoder = self.make_encoder(config.emb_dim)
+        self.weight_linear = nn.Linear(config.hidden_dim + 1, config.hidden_dim)
+
         self.attention_layer = nn.Linear(config.hidden_dim, config.hidden_dim)
         self.attention_v = nn.Linear(config.hidden_dim, 1, bias=False)
         self.hidden_layer = nn.Linear(config.hidden_dim, config.hidden_dim)
@@ -410,6 +430,11 @@ class IAMM(nn.Module):
         self.attention_v2 = nn.Linear(config.hidden_dim, 1, bias=False)
         self.hidden_layer2 = nn.Linear(config.hidden_dim, config.hidden_dim)
         self.output_layer2 = nn.Linear(config.hidden_dim, num_emotions)
+
+        self.attention_layer3 = nn.Linear(config.hidden_dim, config.hidden_dim)
+        self.attention_v3 = nn.Linear(config.hidden_dim, 1, bias=False)
+        self.hidden_layer3 = nn.Linear(config.hidden_dim, config.hidden_dim)
+        self.output_layer3 = nn.Linear(config.hidden_dim, num_emotions)
 
         relation_dim = config.hidden_dim
         self.attention_layer4 = nn.Linear(relation_dim, relation_dim)
@@ -426,15 +451,27 @@ class IAMM(nn.Module):
         self.con_linear = nn.Linear(config.con_topk, config.con_topk)
         self.sent_linear = nn.Linear(config.cs_topk, config.cs_topk)
         sent_hidden = config.ctx_topk * ( config.depth // config.heads)
+        #print(f"sent_hidden: {sent_hidden}")
         self.relation_linear = nn.Linear(sent_hidden, config.hidden_dim)
         con_hidden = config.con_topk * ( config.depth // config.heads)
         self.con_relation_linear = nn.Linear(con_hidden, config.hidden_dim)
 
+        # Concept topk
+        self.context_linear = nn.Linear(config.emb_dim, config.emb_dim)
+        self.concept_linear = nn.Linear(config.emb_dim, config.emb_dim)
+        self.emb_linear = nn.Linear(config.emb_dim, self.compress_dim, bias=False)
+        self.topk_linear = nn.Linear(self.compress_dim * 2 + 1, 1)
+
+        self.emo_lin = nn.Linear(config.hidden_dim, decoder_number, bias=False)
         if not config.woCOG:
             self.cog_lin = MLP()
 
         self.generator = Generator(config.hidden_dim, self.vocab_size)
+        self.sit_generator = Generator(config.hidden_dim, self.vocab_size)
         self.activation = nn.Softmax(dim=1)
+
+        #self.temperature = 0.07
+        #self.contrastive_layer = ContrastModel(device_id=config.device, temperature=self.temperature)
 
         if config.weight_sharing:
             self.generator.proj.weight = self.embedding.lut.weight
@@ -444,6 +481,7 @@ class IAMM(nn.Module):
             self.criterion.weight = torch.ones(self.vocab_size)
 
         self.criterion_ppl = nn.NLLLoss(ignore_index=config.PAD_idx)
+        #self.idf_criterion = nn.NLLLoss(ignore_index=config.PAD_idx, reduction="sum")
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.lr)
         if config.noam:
@@ -457,6 +495,9 @@ class IAMM(nn.Module):
         if model_file_path is not None:
             print("loading weights")
             state = torch.load(model_file_path, map_location=config.device)
+            #if "idf_criterion.weight" in state["model"].keys():
+            #    del state["model"]["idf_criterion.weight"]
+            ##print("state keys", state["model"].keys())
             self.load_state_dict(state["model"])
             if load_optim:
                 self.optimizer.load_state_dict(state["optimizer"])
@@ -527,6 +568,18 @@ class IAMM(nn.Module):
         emo_logits = self.output_layer2(x)
         return emo_logits 
 
+#    def get_con_rel_logits(self, enc_outputs):
+#        # Attention emotion
+#        projected = self.attention_layer3(enc_outputs)
+#        projected = nn.Tanh()(projected)
+#        scores = nn.Softmax(dim=-1)(self.attention_v3(projected).squeeze(2))
+#        scores = scores.unsqueeze(1)  # (batch_size, 1, seq_len)
+#        hidden_x = torch.bmm(scores, enc_outputs).squeeze(1)
+#        x = self.hidden_layer3(hidden_x)
+#        x = nn.Tanh()(x)
+#        emo_logits = self.output_layer3(x)
+#        return emo_logits 
+
     def get_relation_logits(self, enc_outputs):
         # Attention emotion
         projected = self.attention_layer4(enc_outputs)
@@ -559,37 +612,57 @@ class IAMM(nn.Module):
         for r in self.rels:
             if data_type == "sit":
                 r = r.replace("c_", "s_")
+            #print(f"data_type: {data_type}, r: {r}")
             batch_r = batch[r][:, i, :]
+            #print(f"batch_r: {batch[r].shape}, r: {r}")
             emb = self.embedding(batch_r).to(config.device)
             mask = batch_r.data.eq(config.PAD_idx).unsqueeze(1)
+            #print(f"mask: {mask.shape}")
             cs_indexes.append(batch_r)
             cs_embs.append(emb)
+            #print(f"{r} emb shape:", emb.shape)
             if "react" not in r:
+                #print(f"Not In react: {r}")
                 enc_output = self.cog_encoder(emb, mask)
             else:
+                #print(f"In react: {r}")
                 enc_output = self.cog_encoder(emb, mask)
+                #enc_output = self.emo_encoder(emb, mask)
+            #cs_outputs.append(enc_output)
             enc_output = enc_output[:, 0, :].unsqueeze(1)
+            #print(f"enc_output: {enc_output.shape}")
             cs_outputs.append(enc_output)
             mask = mask[:, :, 1].unsqueeze(2) # CLS[0] is masked
+            #print(f"mask 2: {mask.shape}")
             cs_masks.append(mask)
         cs_outputs = torch.cat(cs_outputs, dim=1)
         cs_masks = torch.cat(cs_masks, dim=2)
+        #print(f"cs_outputs: {cs_outputs.shape}")
+        #print(f"cs_masks: {cs_masks.shape}")
         return cs_outputs, cs_masks
 
     def select_topk(self, key, value, mask=None, k=config.ctx_topk): 
         value_shape = value.shape
         scores, index = key.topk(k, dim=-1, largest=True, sorted=True)
+        #print(f"index: {index.shape}, {index}")
         index = index.view(-1, k)
+        #print(f"index: {index.shape}, {index}")
             
         bz_index = torch.tensor(range(index.shape[0])) * value_shape[-2]
         bz_index = bz_index.unsqueeze(-1).cuda()
+        #print(f"bz_index: {bz_index.shape}, {bz_index}")
         index = (index + bz_index).view(-1)
+        #print(f"index: {index.shape}, {index}")
         value = value.reshape(-1, value.shape[-1])
+        #print(f"value: {value.shape}, {value}")
         selected_values = torch.index_select(value, 0, index)
         if mask is None:
             return scores, selected_values
         else:
+            #print(f"mask: {mask.shape}")
             selected_mask = torch.gather(mask.reshape(-1), dim=-1, index=index)
+            #print(f"mask scores: {scores}")
+            #print(f"selected_mask: {selected_mask.shape}, {selected_mask}")
             return scores, selected_values, selected_mask
 
     def calculate_weight_value(self, scores, selected_values, value_shape, con_flag):
@@ -598,6 +671,9 @@ class IAMM(nn.Module):
         else:
             k = config.ctx_topk
         selected_values = selected_values.view(value_shape[0], value_shape[1], value_shape[2], k, value_shape[4])
+        #print(f"scores: {scores.shape}")
+        #print("selected_values:", selected_values)
+        # Update: need to mask here, and change to the same process as the sentence dimension.
         if con_flag:
             scores = self.con_linear(scores)
         else:
@@ -609,9 +685,12 @@ class IAMM(nn.Module):
 
     def calculate_sent_value(self, scores, selected_values, value_shape, k=config.cs_topk):
         selected_values = selected_values.view(value_shape[0], value_shape[1], k, value_shape[3])
+        #print(f"scores: {scores.shape}")
+        #print("selected_values:", selected_values)
         scores = self.sent_linear(scores)
         scores = torch.sigmoid(scores).unsqueeze(-1)
         v_shape = selected_values.shape
+        #print(f"v_shape: {v_shape}")
         weighted_values = (scores * selected_values).reshape(v_shape[0], v_shape[1] * v_shape[2], v_shape[3])
         return weighted_values 
 
@@ -624,34 +703,104 @@ class IAMM(nn.Module):
         else:
             ctx_k = config.ctx_topk
         r1_value = r1_value.unsqueeze(2).repeat(1, 1, r1_logit.shape[2], 1, 1) # Expand to the same dimension as r1_logit.
+        #print(f"r1_value: {r1_value.shape}")
         scores, selected_values = self.select_topk(r1_logit, r1_value, mask=None, k=ctx_k)
+        #print("scores, selected_values", scores.shape, selected_values.shape)
         weighted_r1 = self.calculate_weight_value(scores, selected_values, r1_value.shape, con_flag=con_flag)
+        #print(f"topk_r1: {weighted_r1.shape}")
 
         r2_value = r2_value.unsqueeze(2).repeat(1, 1, r2_logit.shape[2], 1, 1)
         scores, selected_values  = self.select_topk(r2_logit, r2_value, mask=None, k=ctx_k)
         weighted_r2 = self.calculate_weight_value(scores, selected_values, r2_value.shape, con_flag=con_flag)
+        #print(f"topk_r2: {weighted_r2.shape}")
 
         # Select and merge the relations
         cross_r1_logit = torch.mean(r1_logit, dim=2)
+        #print(f"cross_r1_logit: {cross_r1_logit.shape}")
         cross_r2_logit = torch.mean(r2_logit, dim=2)
+        #print(f"cross_r2_logit: {cross_r2_logit.shape}")
         r1_mask = r1_mask.repeat(1, config.heads, 1)
         r2_mask = r2_mask.repeat(1, config.heads, 1)
-
+        ##print(f"r1_mask: {r1_mask.shape}")
+        ##print(f"r2_mask: {r2_mask.shape}")
         cross_r1_scores, cross_r1, cross_r1_mask = self.select_topk(cross_r2_logit, weighted_r1, r1_mask, config.cs_topk)
+        #print(f"cross_r1: {cross_r1.shape}")
         cross_r2_scores, cross_r2, cross_r2_mask = self.select_topk(cross_r1_logit, weighted_r2, r2_mask, config.cs_topk)
+        #print(f"cross_r2: {cross_r2.shape}")
         weighted_cross_r1 = self.calculate_sent_value(cross_r1_scores, cross_r1, weighted_r1.shape, k=config.cs_topk)
         weighted_cross_r2 = self.calculate_sent_value(cross_r2_scores, cross_r2, weighted_r2.shape, k=config.cs_topk)
+        #print(f"weighted_cross_r1: {weighted_cross_r1.shape}")
+        #print(f"weighted_cross_r2: {weighted_cross_r2.shape}")
         relations = torch.cat((weighted_cross_r1, weighted_cross_r2), dim=1)
         cross_r1_mask = self.reshape_mask(cross_r1_mask, weighted_r1.shape)
         cross_r2_mask = self.reshape_mask(cross_r2_mask, weighted_r2.shape)
         relations_mask = torch.cat((cross_r1_mask, cross_r2_mask), dim=2)
-
+        #print(f"relations_mask: {relations_mask.shape}")
+        #print(f"relations: {relations.shape}")
         if con_flag:
             relations = self.con_relation_linear(relations)
         else:
             relations = self.relation_linear(relations)
+        #print(f"relations 2: {relations.shape}")
+        #print("=============================")
         return relations, relations_mask 
         
+    def select_topk_concept(self, enc_emb, concept_word_emb, context_concept, topk_num=config.ctx_topk):
+        ctx_num = enc_emb.shape[1]
+        concept_num = context_concept.shape[1]
+
+        #print(f"enc_emb: {enc_emb.shape}")
+        #print(f"concept_word_emb: {concept_word_emb.shape}")
+
+        # bz, src_len, emb_dim
+        context_word_emb = enc_emb
+        context_emb = self.context_linear(context_word_emb)
+        #print(f"context_emb: {context_emb.shape}")
+        concept_emb = self.concept_linear(concept_word_emb)
+        #print(f"concept_emb: {concept_emb.shape}")
+        #dot_score = torch.sum(torch.mul(context_emb, concept_emb), dim=-1).unsqueeze(-1)
+        dot_score = torch.matmul(context_emb, concept_emb.permute(0, 2, 1)) # bz, src_len, trg_len
+        dot_score = dot_score.unsqueeze(3)
+        #print(f"dot_score: {dot_score.shape}")
+
+        context_compress = self.emb_linear(context_word_emb)
+        context_compress = context_compress.unsqueeze(2).repeat(1, 1, concept_num, 1) 
+        #print(f"context_compress: {context_compress.shape}")
+        concept_compress = self.emb_linear(concept_word_emb)
+        concept_compress = concept_compress.unsqueeze(1).repeat(1, ctx_num, 1, 1)
+        #print(f"concept_compress: {concept_compress.shape}")
+        topk_feature = torch.cat([context_compress, concept_compress, dot_score], dim=-1)
+        topk_feature = nn.ReLU()(topk_feature)
+        topk_score = self.topk_linear(topk_feature) # bz, src_len, concept_num, 1
+        #print(f"topk_score: {topk_score.shape}")
+
+        bz = topk_feature.shape[0]
+        emb_size = context_word_emb.shape[-1] 
+        topk_score = topk_score.view(bz, -1)
+        #print(f"topk_score: {topk_score.shape}")
+        topk_emb = concept_word_emb.unsqueeze(1).repeat(1, ctx_num, 1, 1).view(bz, -1, emb_size) 
+        #print(f"topk_emb: {topk_emb.shape}")
+
+        # select topk 
+        scores, index = topk_score.topk(topk_num, dim=-1, largest=True, sorted=True)
+        #print(f"scores: {scores.shape}, {scores}")
+        res = []
+        for i in range(bz):
+            emb = torch.index_select(topk_emb[i, :, :], 0, index=index[i, :]) 
+            #print(f"emb: {emb.shape}")
+            res.append(emb.unsqueeze(0))
+        res_emb = torch.cat(res, dim=0)
+        #print(f"res_emb: {res_emb.shape}, {res_emb}")
+        scores = torch.sigmoid(scores).unsqueeze(-1)
+        #print(f"score: {scores.shape}, {scores}")
+        scored_emb = scores * res_emb 
+        context_concept = context_concept.unsqueeze(1).repeat(1, ctx_num, 1)
+        concept_index = torch.gather(context_concept.view(bz, -1), dim=-1, index=index)
+        #print(f"concept_index: {concept_index.shape}")
+        concept_mask = concept_index.data.eq(config.PAD_idx).unsqueeze(1)
+        #print(f"concept_mask: {concept_mask.shape}, {concept_mask}")
+        return scored_emb, concept_index, concept_mask 
+
     def forward(self, batch):
         # Input for context and situation.
 
@@ -727,6 +876,7 @@ class IAMM(nn.Module):
 
                 previous_rel = torch.cat((previous_rel, sc_rel, rc_rel, pc_rel), dim=1)
                 previous_rel_mask = torch.cat((previous_rel_mask, sc_rel_mask, rc_rel_mask, pc_rel_mask), dim=2)
+                #print(f"previous_rel {i}: {previous_rel.shape}")
 
                 ## Comet relations
                 # Build con relation: ctx <-> pre_rel
@@ -772,13 +922,19 @@ class IAMM(nn.Module):
         total_con_mask = torch.cat((sit_con_masks, sent_ctx_con_outputs_mask[-1]), dim=2)
         total_con_outputs = self.total_con_encoder(total_con_outputs, total_con_mask)
         con_logits = self.get_con_logits(total_con_outputs)
+        #print(f"previous_rel: {previous_rel.shape}")
 
         select_score = self.select_w(previous_rel).squeeze(-1)
-        rel_score, rel_value, rel_mask = self.select_topk(select_score, previous_rel, mask=previous_rel_mask, k=15)
+        #print(f"select_score: {select_score.shape}")
+        rel_score, rel_value, rel_mask = self.select_topk(select_score, previous_rel, mask=previous_rel_mask, k=10)
         rel_score = rel_score.unsqueeze(-1)
         rel_value = rel_value.reshape(rel_score.shape[0], rel_score.shape[1], -1)
         rel_mask = rel_mask.reshape(rel_score.shape[0], 1, rel_score.shape[1]) 
         rel_value =  torch.sigmoid(rel_score) * rel_value 
+#        print(f"rel_score: {rel_score.shape}")
+#        print(f"rel_value: {rel_value.shape}")
+#        print(f"rel_mask: {rel_mask.shape}")
+#        print("==========================")
 
         # Emotion logit
         emo_logits = ctx_emo_logits + sit_emo_logits + relation_logits + con_logits #+ con_rel_logits
@@ -817,11 +973,16 @@ class IAMM(nn.Module):
         # batch_size * seq_len * 300 (GloVe)
         dec_emb = self.embedding(dec_batch_shift)
         pre_logit, attn_dist = self.decoder(dec_emb, ctx_output, (src_mask, mask_trg))
+        #sit_pre_logit, sit_attn_dist = self.sit_decoder(dec_emb, sit_output, (sit_mask, mask_trg))
         rel_pre_logit, rel_attn_dist = self.rel_decoder(dec_emb, rel_value, (rel_mask, mask_trg))
 
         rs_gate_logit = torch.cat([pre_logit, rel_pre_logit], dim=-1)
         rs_gate_score = torch.sigmoid(self.rs_logit_linear(rs_gate_logit))
         pre_logit = rs_gate_score * pre_logit + (1 - rs_gate_score) * rel_pre_logit
+
+#        gate_logit = torch.cat([pre_logit, sit_pre_logit, rel_pre_logit], dim=-1)
+#        gate_score = torch.sigmoid(self.logit_linear(gate_logit))
+#        pre_logit = gate_score * pre_logit + (1 - gate_score) * rs_pre_logit
 
         ## compute output dist
         logit = self.generator(
@@ -832,24 +993,39 @@ class IAMM(nn.Module):
             attn_dist_db=None,
         )
 
+#        sit_logit = self.sit_generator(
+#            sit_pre_logit,
+#            sit_attn_dist,
+#            situation_ext_batch if config.pointer_gen else None,
+#            extra_zeros,
+#            attn_dist_db=None,
+#        )
+
         emo_label = torch.LongTensor(batch["program_label"]).to(config.device)
-        #situation_vec_batch = batch["situation_vec_batch"]
 
         # Emotion loss
         sit_emo_loss = nn.CrossEntropyLoss(reduction='mean')(sit_emo_logits, emo_label).to(config.device)
         enc_emo_loss = nn.CrossEntropyLoss(reduction='mean')(ctx_emo_logits, emo_label).to(config.device)
         relation_emo_loss = nn.CrossEntropyLoss(reduction='mean')(relation_emo_logits, emo_label).to(config.device)
         con_emo_loss = nn.CrossEntropyLoss(reduction='mean')(con_logits, emo_label).to(config.device)
+        #con_rel_emo_loss = nn.CrossEntropyLoss(reduction='mean')(con_rel_logits, emo_label).to(config.device)
 
         ctx_loss = self.criterion_ppl(
             logit.contiguous().view(-1, logit.size(-1)),
             dec_batch.contiguous().view(-1),
         )
 
+        #sit_ctx_loss = self.criterion_ppl(
+        #    sit_logit.contiguous().view(-1, sit_logit.size(-1)),
+        #    dec_batch.contiguous().view(-1),
+        #)
 
-        loss = ctx_loss + sit_emo_loss + enc_emo_loss + relation_emo_loss + con_emo_loss 
+        loss = ctx_loss + sit_emo_loss + enc_emo_loss + relation_emo_loss + con_emo_loss #+ con_rel_emo_loss # Generation loss and Emotion loss
+        #print(f"ctx_loss: {ctx_loss} sit_emo_loss: {sit_emo_loss} enc_emo_loss: {enc_emo_loss} relation_emo_loss: {relation_emo_loss}")
 
-        emo_loss = sit_emo_loss + enc_emo_loss + relation_emo_loss + con_emo_loss 
+        emo_loss = sit_emo_loss + enc_emo_loss + relation_emo_loss + con_emo_loss #+ con_rel_emo_loss 
+        #sit_ctx_loss = ctx_loss + sit_ctx_loss 
+        #logit = 0.5 * logit + 0.5 * sit_logit
         pred_program = np.argmax(emo_logits.detach().cpu().numpy(), axis=1)
         program_acc = accuracy_score(batch["program_label"], pred_program)
 
@@ -859,8 +1035,8 @@ class IAMM(nn.Module):
 
         ctx_loss_list = []
         batch_size = emo_logits.size(0)
-        top_preds = [[] for _ in range(batch_size)]  
-        comet_res = []  
+        top_preds = [[] for _ in range(batch_size)]  # 返回一个batch的内容
+        comet_res = []  # 返回一个batch的内容
 
         if self.is_eval:
             # comet outputs
@@ -870,6 +1046,7 @@ class IAMM(nn.Module):
             for i in range(batch_size):
                 temp_dict = {}
                 for r in self.rels:
+                    #txt = [[" ".join(t) for t in tm] for tm in batch[f"{r}_txt"]][i]  #
                     temp_dict[r] = []#txt
                 comet_res.append(temp_dict)
 
@@ -885,7 +1062,7 @@ class IAMM(nn.Module):
             self.optimizer.step()
 
         return (
-            ctx_loss.item() if train else ctx_loss_list,  
+            ctx_loss.item() if train else ctx_loss_list,  # 最后还是用这个值来计算ppl
             math.exp(min(ctx_loss.item(), 100)) if train else np.mean(ctx_loss_list),  # modify testBatch
             emo_loss.item(),
             program_acc,
@@ -914,6 +1091,7 @@ class IAMM(nn.Module):
             _,  
             _,  
         ) = get_input_from_batch(batch)
+        #src_mask, ctx_output, sit_outputs, emo_logits, sit_emo_logits, sc_emo_logits, teacher_emo_logits = self.forward(batch)
         src_mask, sit_mask, ctx_output, sit_output, ctx_emo_logits, sit_emo_logits, emo_logits, relation_emo_logits, con_logits = self.forward(batch)
 
         ys = torch.ones(1, 1).fill_(config.SOS_idx).long().to(config.device)
@@ -987,11 +1165,13 @@ class IAMM(nn.Module):
         src_mask, sit_mask, ctx_output, sit_output, ctx_emo_logits, sit_emo_logits, emo_logits, relation_emo_logits, con_logits, rel_value, rel_mask = self.forward(batch)
 
         batch_size = ctx_output.size(0)  # testBatch
+        # ys = torch.ones(1, 1).fill_(config.SOS_idx).long().to(config.device)  # torch.Size([1, 1]) tensor([[3]])
         ys = torch.ones(batch_size, 1).fill_(config.SOS_idx).long().to(config.device)  # torch.Size([batch_size, 1])  # testBatch
         mask_trg = ys.data.eq(config.PAD_idx).unsqueeze(1)  # torch.Size([batch_size, 1, 1])
         decoded_words = []
 
-        for i in range(max_dec_step + 1):  
+        # 进入循环以后，ys 是动态改变的
+        for i in range(max_dec_step + 1):  # 一个个生成预测的词
             ys_embed = self.embedding(ys)  # torch.Size([batch_size, 1, 300])
             if config.project:
                 out, attn_dist = self.decoder(
@@ -999,12 +1179,23 @@ class IAMM(nn.Module):
                     self.embedding_proj_in(ctx_output),
                     (src_mask, mask_trg),
                 )   
-            else:  
+            else:  # 正常执行这里下面的内容 ↓
+
+#                rs_gate_logit = torch.cat([sit_pre_logit, rel_pre_logit], dim=-1)
+#                rs_gate_score = torch.sigmoid(self.rs_logit_linear(rs_gate_logit))
+#                rs_pre_logit = rs_gate_score * sit_pre_logit + (1 - rs_gate_score) * rel_pre_logit
+#        
+#                gate_logit = torch.cat([pre_logit, sit_pre_logit, rel_pre_logit], dim=-1)
+#                gate_score = torch.sigmoid(self.logit_linear(gate_logit))
+#                pre_logit = gate_score * pre_logit + (1 - gate_score) * rs_pre_logit
 
                 out, attn_dist = self.decoder(  # out : torch.Size([batch_size, 1, 300])
                     ys_embed, ctx_output, (src_mask, mask_trg)
                 )   
     
+#                sit_out, sit_attn_dist = self.sit_decoder(  # out : torch.Size([batch_size, 1, 300])
+#                    ys_embed, sit_output, (sit_mask, mask_trg)
+#                )   
                 # , rel_value, rel_mask
                 rel_out, rel_attn_dist = self.rel_decoder(  # out : torch.Size([batch_size, 1, 300])
                     ys_embed, rel_value, (rel_mask, mask_trg)
@@ -1014,10 +1205,19 @@ class IAMM(nn.Module):
                 rs_gate_score = torch.sigmoid(self.rs_logit_linear(rs_gate_logit))
                 out = rs_gate_score * out + (1 - rs_gate_score) * rel_out
 
+#                gate_logit = torch.cat([out, sit_out, rel_out], dim=-1)
+#                gate_score = torch.sigmoid(self.logit_linear(gate_logit))
+#                out = gate_score * out + (1 - gate_score) * rs_out
+    
             prob = self.generator(
+                # out, attn_dist, enc_batch_extend_vocab, extra_zeros, attn_dist_db=None
                 out, attn_dist, enc_batch_extend_vocab, extra_zeros, attn_dist_db=None
             )   
 
+            #sit_prob = self.sit_generator(
+            #    sit_out, sit_attn_dist, situation_ext_batch, extra_zeros, attn_dist_db=None,
+            #)
+            #prob = 0.5 * prob + 0.5 * sit_prob
             _, next_word = torch.max(prob[:, -1], dim=1)
             decoded_words.append(
                 [   
@@ -1032,7 +1232,7 @@ class IAMM(nn.Module):
                 [ys, next_word.unsqueeze(1).long().to(config.device)],
                 dim=1,
             ).to(config.device)  # testBatch
-            mask_trg = ys.data.eq(config.PAD_idx).unsqueeze(1)  
+            mask_trg = ys.data.eq(config.PAD_idx).unsqueeze(1)  # 2023-4-15： 这里要mask的应该是 EOS 吧 ？
 
         sents = []  #  testBatch
         for _, row in enumerate(np.transpose(decoded_words)):
@@ -1046,7 +1246,7 @@ class IAMM(nn.Module):
             sent.append(st)
             sents.append(sent)  #  testBatch
 
-        return sents  
+        return sents  # 搞定批量生成 sents   testBatch
 
     def decoder_topk(self, batch, max_dec_step=30):
         (
